@@ -5,7 +5,7 @@ Diﬀerential Privacy of Gaussian Process Posterior Sampling. Probing DP guarant
 
 ## LiRA Membership Inference Attack
 
-Example: to recreate the LiRA attack results for $r=0.5$, $\sigma=0.5$ and $L=3$ posterior draws run the following command:
+Example: to recreate the LiRA attack results for $r=0.1$, $\sigma=0.5$ and $L=3$ posterior draws run the following command:
 ```
 python lira_fhat_vhat_latent_gmm_exp1d_logv.py \
   --n 10 \

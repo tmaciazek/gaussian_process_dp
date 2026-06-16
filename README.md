@@ -41,3 +41,12 @@ python nonprivate_gridsearch_exp_excursion_set_bce.py\
     --target-reject-max-components 13 \
     --target-reject-min-mean-component-width 0.05
 ```
+
+## 2D Excursion Set Experiments
+Example: to recreate the 2D excurion set results for $M_\xi=0.5$ just set `--M-xi 0.5` below. 
+```
+python run_2d_excursion_gp_private_sigmoid_smoothed.py --M-xi 0.5
+```
+
+## London Property Sales Experiment
+First download the [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) from 2018 and 2017. Then, download the [postcode lookup table](https://geoportal.statistics.gov.uk/datasets/6fff67d204fd4f339591ed667a6e3642/about).

@@ -49,4 +49,32 @@ python run_2d_excursion_gp_private_sigmoid_smoothed.py --M-xi 0.5
 ```
 
 ## London Property Sales Experiment
-First download the [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) from 2018 and 2017. Then, download the [postcode lookup table](https://geoportal.statistics.gov.uk/datasets/6fff67d204fd4f339591ed667a6e3642/about).
+First download the [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) from 2018 and 2017. Then, download the [postcode lookup table](https://geoportal.statistics.gov.uk/datasets/6fff67d204fd4f339591ed667a6e3642/about). If the property sales data is `pp-2017.csv` and the postcode lookup table is in the file `NSPL.csv` then to fit the GP hyperparameters run:
+```
+python fit_hexbin_gp_excursion_london_private.py \
+  --ppd pp-2017.csv \
+  --postcode-lookup NSPL.csv \
+  --threshold 13.0 \
+  --gridsize 40 \
+  --mincnt 1 \
+  --epsilon0 10 \
+  --M-Y 1.0 \
+  --L 1 \
+  --out-figure london_hexbin_gp_public_excursion.png \
+  --out-private-figure london_hexbin_gp_private_excursion.png \
+  --out-summary london_hexbin_gp_private_summary.json \
+  --no-show
+```
+Then, apply those hyperparameters to find the excursion set for 2018 data as follows:
+```
+python fit_hexbin_gp_excursion_london_private_json.py \
+  --ppd pp-2018.csv \
+  --postcode-lookup NSPL.csv \
+  --threshold 13.0 \
+  --response-scale 1.0 \
+  --gridsize 40 \
+  --mincnt 3 \
+  --n-sample-paths 3 \
+  --path-grid-size 60 \
+  --path-seed 123 \
+```

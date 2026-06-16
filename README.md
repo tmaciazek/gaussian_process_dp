@@ -3,6 +3,8 @@ This repository is the official implementation of [Diﬀerential Privacy of Gaus
 
 Diﬀerential Privacy of Gaussian Process Posterior Sampling. Probing DP guarantees by MIA and privacy-utility tradeoff via excursion sets.
 
+This repository contains the main scripts used for the experiments in the paper. We are currently cleaning and documenting the remaining plotting and 2D-experiment scripts. They will be added in a subsequent update.
+
 ## LiRA Membership Inference Attack
 
 Example: to recreate the LiRA attack results for $r=0.1$, $\sigma=0.5$ and $L=3$ posterior draws run the following command:

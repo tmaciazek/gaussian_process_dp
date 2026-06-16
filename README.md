@@ -23,7 +23,7 @@ python lira_fhat_vhat_latent_gmm_exp1d_logv.py \
 Example: to recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
 ```
 python nonprivate_gridsearch_exp_excursion_set_bce.py\
-    --n-train 10 \ 
+    --n-train 100 \ 
     --n-target-grid 800 \
     --ell-true 1. \
     --ell-model 0.08,0.13,0.2,0.25,0.35,0.5,0.6,0.75,1 \

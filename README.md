@@ -11,7 +11,7 @@ To reproduce Figure 1 from the paper run:
 ```
 python plot_dp_contours.py
 ```
-and to reproduce Figure 5 from Appendix B.5 showing how many sample paths can be released at a given provacy budget run for example:
+and to reproduce Figure 5 from Appendix B.5 showing how many sample paths can be released at a given privacy budget run for example:
 ```
 python plot_lmax_contours.py --epsilon-budget 10.0
 ```

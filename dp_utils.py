@@ -1,600 +1,565 @@
-# dp_utils.py
+"""Tight DP accounting utilities for GP posterior sampling.
 
+Only the tightened bounds are implemented:
+
+* the signed rank-two covariance term;
+* the improved RDP-to-DP conversion;
+* the minimum of the coupled and operator generic sensitivities;
+* the factor-two-improved fixed-RKHS-response sensitivity; and
+* the bounded-mean refinement for the 1D exponential kernel.
+
+The optional ``eta`` parameter is the scale of an independent draw from the
+GP prior added to the posterior draw.  For ``eta > 0`` the tightened enhanced
+mechanism bound is used.
+"""
+
+from __future__ import annotations
+
+import heapq
 import math
+from typing import Callable
+
 import numpy as np
 
 
-def v_n(n, r, kappa):
-    """
-    Equivalent of Mathematica:
-
-        VnFun[n_, r_, kappa_] :=
-            1 - kappa^2 (n - 1)/(n - 1 + r^2)
-    """
-    return 1.0 - kappa**2 * (n - 1.0) / (n - 1.0 + r**2)
+ACCOUNTANT_VERSION = "tight-rdp-2026-09"
 
 
-def phi_n(n, r, kappa):
-    """
-    Equivalent of Mathematica:
+def _validate_common(n: int, r: float, kappa: float) -> None:
+    if n < 1:
+        raise ValueError("n must be at least 1")
+    if r <= 0.0:
+        raise ValueError("r must be positive")
+    if not (0.0 <= kappa <= 1.0):
+        raise ValueError("kappa must lie in [0, 1]")
 
-        PhiNFun[n_, r_, kappa_] :=
-            Module[{v}, v = VnFun[n, r, kappa];
-                If[v >= r^2, 1/(4 r^2), v/(v + r^2)^2]]
-    """
+
+def v_n(n: int, r: float, kappa: float) -> float:
+    """Return V_n(r) = 1 - kappa^2 (n-1)/(n-1+r^2)."""
+    _validate_common(n, r, kappa)
+    value = 1.0 - kappa * kappa * (n - 1.0) / (n - 1.0 + r * r)
+    return min(1.0, max(0.0, value))
+
+
+def phi_from_v(r: float, v: float) -> float:
+    """Return sup_{0 <= u <= v} u/(r^2+u)^2."""
+    if r <= 0.0:
+        raise ValueError("r must be positive")
+    if v < 0.0:
+        raise ValueError("v must be nonnegative")
+    u_star = min(v, r * r)
+    return u_star / (r * r + u_star) ** 2
+
+
+def phi_n(n: int, r: float, kappa: float) -> float:
+    """Return Phi_n(r)."""
+    return phi_from_v(r, v_n(n, r, kappa))
+
+
+def tau_tilde(
+    n: int,
+    r: float,
+    kappa: float,
+    sigma: float,
+    eta: float = 0.0,
+) -> float:
+    """Return the covariance parameter for the enhanced mechanism."""
+    if sigma <= 0.0:
+        raise ValueError("sigma must be positive")
+    if eta < 0.0:
+        raise ValueError("eta must be nonnegative")
     v = v_n(n, r, kappa)
-
-    if v >= r**2:
-        return 1.0 / (4.0 * r**2)
-
-    return v / (v + r**2)**2
-
-
-def tau_tilde(n, r, kappa, sigma, eta):
-    """
-    Equivalent of Mathematica:
-
-        TauTildeFun[n_, r_, kappa_, sigma_, eta_] :=
-            Module[{v}, v = VnFun[n, r, kappa];
-                sigma^2 v/(sigma^2 r^2 + eta^2 (v + r^2))]
-    """
-    v = v_n(n, r, kappa)
-
-    # Handles sigma = np.inf or math.inf by taking the limiting value.
-    if math.isinf(sigma):
-        return v / r**2
-
-    return sigma**2 * v / (sigma**2 * r**2 + eta**2 * (v + r**2))
-
-
-# ---------------------------------------------------------------------
-# Core Exp1D DP utility functions
-# ---------------------------------------------------------------------
-
-def delta_n_exp_1d(n, r, kappa):
-    """
-    Equivalent of Mathematica:
-
-        DeltaNExp1DFun[n_, r_, kappa_] :=
-            Module[{phi}, phi = PhiNFun[n, r, kappa];
-            4 Sqrt[phi]]/Sqrt[2];
-    """
-    phi = phi_n(n, r, kappa)
-    return 4.0 * math.sqrt(phi) / math.sqrt(2.0)
-
-
-def psi_beta(beta, tau):
-    """
-    Equivalent of the PsiBetaFun[beta, tau] expression used inside
-    EpsilonForDeltaBetaExp1D and DeltaForEpsilonBetaExp1D.
-    """
-    log1ptau = math.log1p(tau)
-
-    term1 = (
-        0.5 * log1ptau
-        - tau / (2.0 * beta) * (math.log(1.0 + tau + beta) - log1ptau)
-    )
-
-    term2 = (
-        -0.5 * log1ptau
-        - tau / (2.0 * beta) * math.log1p(-beta)
-    )
-
-    return max(term1, term2)
-
-
-def rdp_bound_beta_exp_1d(n, r, kappa, sigma, eta, L, beta):
-    """
-    Equivalent of Mathematica:
-
-        RDPBoundBetaExp1DFun[n, r, kappa, sigma, eta, L, beta]
-    """
-    v = v_n(n, r, kappa)
-    delta_n = delta_n_exp_1d(n, r, kappa)
-    tau = tau_tilde(n, r, kappa, sigma, eta)
-
-    alpha = 1.0 + beta / tau
-
-    A = sigma**2 * r**2 + eta**2 * (v + r**2)
-    denom = A * (1.0 - beta)
-
-    return (
-        2.0 * L * psi_beta(beta, tau)
-        + L * (alpha / 2.0) * ((v + r**2) / denom) * delta_n**2
+    return sigma * sigma * v / (
+        sigma * sigma * r * r + eta * eta * (v + r * r)
     )
 
 
-# ---------------------------------------------------------------------
-# Small replacement for FastBetaMinimize
-# ---------------------------------------------------------------------
+def _coupled_supremum_upper(
+    n: int,
+    r: float,
+    v: float,
+    tolerance: float = 1e-10,
+) -> float:
+    """Certified numerical upper enclosure of the coupled scalar maximum."""
+    if not (0.0 <= v <= 1.0 + 1e-12):
+        raise ValueError("the coupled bound requires 0 <= V_n(r) <= 1")
+    if v <= 0.0:
+        return 0.0
 
-def fast_beta_minimize(obj, beta_min=1e-8, beta_max=1.0 - 1e-8, grid_size=31):
-    """
-    Lightweight replacement for FastBetaMinimize.
+    q = r * r
+    scale = math.sqrt(max(0.0, n - 1.0)) / r
+    peak_second = 4.0 * q / (
+        math.sqrt(9.0 * q * q + 8.0 * q) + 3.0 * q
+    )
 
-    First evaluates `obj` on a grid, then refines around the best point
-    using golden-section search.
+    def first(u: float) -> float:
+        return math.sqrt(max(0.0, u)) / (q + u)
 
-    Returns
-    -------
-    value_star : float
-        Minimum objective value.
+    def second(u: float) -> float:
+        return scale * u * math.sqrt(max(0.0, 1.0 - u)) / (q + u)
 
-    beta_star : float
-        Approximate minimizer.
-    """
-    if not (0.0 < beta_min < beta_max < 1.0):
-        raise ValueError("Require 0 < beta_min < beta_max < 1.")
+    def objective(u: float) -> float:
+        return first(u) + second(u)
 
-    if grid_size < 3:
-        raise ValueError("grid_size must be at least 3.")
+    def clip(value: float, lower: float, upper: float) -> float:
+        return min(upper, max(lower, value))
 
-    grid = np.linspace(beta_min, beta_max, grid_size)
-    values = np.array([obj(float(b)) for b in grid])
+    def interval_upper(lower: float, upper: float) -> float:
+        return (
+            first(clip(q, lower, upper))
+            + second(clip(peak_second, lower, upper))
+        )
 
-    best_idx = int(np.argmin(values))
+    candidates = [0.0, v, 0.5 * v, min(q, v), min(peak_second, v)]
+    best = max(objective(u) for u in candidates)
+    heap: list[tuple[float, float, float]] = [
+        (-interval_upper(0.0, v), 0.0, v)
+    ]
 
-    if best_idx == 0:
-        left, right = grid[0], grid[1]
-    elif best_idx == grid_size - 1:
-        left, right = grid[-2], grid[-1]
-    else:
-        left, right = grid[best_idx - 1], grid[best_idx + 1]
+    for _ in range(200_000):
+        upper = max(best, -heap[0][0])
+        if upper - best <= tolerance * max(1.0, best):
+            return upper * (1.0 + 2e-14) + 2e-14
 
-    beta_star, value_star = golden_section_minimize(obj, left, right)
+        _, lower, right = heapq.heappop(heap)
+        midpoint = 0.5 * (lower + right)
+        best = max(best, objective(midpoint))
 
-    return value_star, beta_star
+        for sub_lower, sub_upper in ((lower, midpoint), (midpoint, right)):
+            bound = interval_upper(sub_lower, sub_upper)
+            if bound >= best:
+                heapq.heappush(heap, (-bound, sub_lower, sub_upper))
 
+        if not heap:
+            return best * (1.0 + 2e-14) + 2e-14
 
-def golden_section_minimize(obj, left, right, tol=1e-12, max_iter=200):
-    """
-    Simple bounded scalar minimizer.
-    """
-    inv_phi = (math.sqrt(5.0) - 1.0) / 2.0
-
-    x1 = right - inv_phi * (right - left)
-    x2 = left + inv_phi * (right - left)
-
-    f1 = obj(x1)
-    f2 = obj(x2)
-
-    for _ in range(max_iter):
-        if abs(right - left) < tol:
-            break
-
-        if f1 > f2:
-            left = x1
-            x1 = x2
-            f1 = f2
-            x2 = left + inv_phi * (right - left)
-            f2 = obj(x2)
-        else:
-            right = x2
-            x2 = x1
-            f2 = f1
-            x1 = right - inv_phi * (right - left)
-            f1 = obj(x1)
-
-    beta_star = 0.5 * (left + right)
-    value_star = obj(beta_star)
-
-    return beta_star, value_star
+    raise RuntimeError("generic sensitivity maximization did not converge")
 
 
-# ---------------------------------------------------------------------
-# epsilon(delta), optimized over beta
-# ---------------------------------------------------------------------
-
-def epsilon_for_delta_beta_exp_1d(
-    n,
-    r,
-    kappa,
-    sigma,
-    eta,
-    L,
-    delta,
-    beta_safety=1e-8,
-    grid_size=31,
-):
-    """
-    Equivalent of Mathematica:
-
-        EpsilonForDeltaBetaExp1D[
-            n, r, kappa, sigma, eta, L, delta,
-            betaSafety_: 10^-8,
-            gridSize_: 31
-        ]
-    """
-    if not (0.0 < delta < 1.0):
-        raise ValueError("delta must satisfy 0 < delta < 1.")
+def generic_sensitivity_components(
+    n: int,
+    r: float,
+    kappa: float,
+    M_Y: float = 1.0,
+    tolerance: float = 1e-10,
+) -> dict[str, float]:
+    """Return the coupled, operator, and minimum generic sensitivities."""
+    _validate_common(n, r, kappa)
+    if M_Y < 0.0:
+        raise ValueError("M_Y must be nonnegative")
 
     v = v_n(n, r, kappa)
-    delta_n = delta_n_exp_1d(n, r, kappa)
-    tau = tau_tilde(n, r, kappa, sigma, eta)
-
-    A = sigma**2 * r**2 + eta**2 * (v + r**2)
-
-    c_psi = 2.0 * L
-    c_mean = (L / 2.0) * ((v + r**2) / A) * delta_n**2
-    c_delta = tau * math.log(1.0 / delta)
-
-    def obj(beta):
-        alpha = 1.0 + beta / tau
-        psi = psi_beta(beta, tau)
-        rdp = c_psi * psi + c_mean * alpha / (1.0 - beta)
-        return rdp + c_delta / beta
-
-    eps_star, beta_star = fast_beta_minimize(
-        obj,
-        beta_min=beta_safety,
-        beta_max=1.0 - beta_safety,
-        grid_size=grid_size,
+    coupled = 2.0 * M_Y * _coupled_supremum_upper(
+        n=n, r=r, v=v, tolerance=tolerance
     )
-
-    alpha_star = 1.0 + beta_star / tau
-    rdp_star = rdp_bound_beta_exp_1d(
-        n, r, kappa, sigma, eta, L, beta_star
+    operator = (
+        M_Y
+        * math.sqrt(max(0.0, n - 1.0))
+        / r
+        * v
+        / (r * r + v)
+        + 2.0 * M_Y * math.sqrt(phi_from_v(r, v))
     )
-
     return {
-        "Case": "Exp1D",
-        "Epsilon": eps_star,
-        "Delta": delta,
-        "OptimalBeta": beta_star,
-        "OptimalAlpha": alpha_star,
-        "RDPAtOptimalBeta": rdp_star,
-        "Vn": v,
-        "DeltaN": delta_n,
-        "TauTilde": tau,
-        "AlphaRange": (1.0, 1.0 + 1.0 / tau),
-        "BetaRange": (0.0, 1.0),
+        "coupled": coupled,
+        "operator": operator,
+        "minimum": min(coupled, operator),
     }
 
 
-# ---------------------------------------------------------------------
-# delta(epsilon), optimized over beta
-# ---------------------------------------------------------------------
+def delta_n_generic(
+    n: int,
+    r: float,
+    kappa: float,
+    M_Y: float = 1.0,
+    tolerance: float = 1e-10,
+) -> float:
+    """Return min{bar Delta_n(r), hat Delta_n(r)}."""
+    return generic_sensitivity_components(
+        n=n,
+        r=r,
+        kappa=kappa,
+        M_Y=M_Y,
+        tolerance=tolerance,
+    )["minimum"]
 
-def delta_for_epsilon_beta_exp_1d(
-    n,
-    r,
-    kappa,
-    sigma,
-    eta,
-    L,
-    epsilon,
-    beta_safety=1e-8,
-    grid_size=31,
-):
-    """
-    Equivalent of Mathematica:
 
-        DeltaForEpsilonBetaExp1D[
-            n, r, kappa, sigma, eta, L, epsilon,
-            betaSafety_: 10^-8,
-            gridSize_: 31
-        ]
-    """
+def delta_n_rkhs(
+    n: int,
+    r: float,
+    kappa: float,
+    rkhs_norm: float,
+) -> float:
+    """Return ||f_*||_H V_n(r)/(r^2+V_n(r))."""
+    if rkhs_norm < 0.0:
+        raise ValueError("rkhs_norm must be nonnegative")
     v = v_n(n, r, kappa)
-    delta_n = delta_n_exp_1d(n, r, kappa)
-    tau = tau_tilde(n, r, kappa, sigma, eta)
-
-    A = sigma**2 * r**2 + eta**2 * (v + r**2)
-
-    c_psi = 2.0 * L
-    c_mean = (L / 2.0) * ((v + r**2) / A) * delta_n**2
-
-    def obj(beta):
-        alpha = 1.0 + beta / tau
-        psi = psi_beta(beta, tau)
-        rdp = c_psi * psi + c_mean * alpha / (1.0 - beta)
-        return (beta / tau) * (rdp - epsilon)
-
-    log_delta_star, beta_star = fast_beta_minimize(
-        obj,
-        beta_min=beta_safety,
-        beta_max=1.0 - beta_safety,
-        grid_size=grid_size,
-    )
-
-    alpha_star = 1.0 + beta_star / tau
-    rdp_star = rdp_bound_beta_exp_1d(
-        n, r, kappa, sigma, eta, L, beta_star
-    )
-
-    return {
-        "Case": "Exp1D",
-        "Epsilon": epsilon,
-        "Delta": math.exp(log_delta_star),
-        "LogDelta": log_delta_star,
-        "OptimalBeta": beta_star,
-        "OptimalAlpha": alpha_star,
-        "RDPAtOptimalBeta": rdp_star,
-        "Vn": v,
-        "DeltaN": delta_n,
-        "TauTilde": tau,
-        "AlphaRange": (1.0, 1.0 + 1.0 / tau),
-        "BetaRange": (0.0, 1.0),
-    }
-
-# ---------------------------------------------------------------------
-# Generic alpha-optimized bound for posterior sample-path release
-# ---------------------------------------------------------------------
-
-def kappa_exp_kernel_unit_square(ell, diameter=math.sqrt(2.0)):
-    """
-    Lower kernel value on a unit square for the exponential kernel
-
-        k(x,x') = exp(-||x-x'|| / ell).
-
-    Since diam([0,1]^2)=sqrt(2), kappa = exp(-sqrt(2)/ell).
-    """
-    if ell <= 0:
-        raise ValueError("ell must be positive.")
-    return math.exp(-diameter / ell)
+    return rkhs_norm * v / (r * r + v)
 
 
-def delta_n_general(n, r, kappa, M_Y=1.0):
-    """
-    Mean-sensitivity bound used in the alpha-form RDP bound:
-
-        Delta_n(r) = 2 M_Y (1 + sqrt(n-1)/r) sqrt(Phi_n(r)).
-    """
-    if n < 2:
-        raise ValueError("n must be at least 2.")
-    if r <= 0:
-        raise ValueError("r must be positive.")
-    if M_Y < 0:
-        raise ValueError("M_Y must be nonnegative.")
-
-    phi = phi_n(n, r, kappa)
-    return np.sqrt(2.) * M_Y * (1.0 + math.sqrt(n - 1.0) / r) * math.sqrt(phi)
+def delta_n_exp_1d(
+    n: int,
+    r: float,
+    kappa: float,
+    M_Y: float = 1.0,
+) -> float:
+    """Return the O(1) 1D-exponential sensitivity 4 M_Y sqrt(Phi_n)."""
+    if M_Y < 0.0:
+        raise ValueError("M_Y must be nonnegative")
+    return 2.0 * M_Y * math.sqrt(phi_n(n, r, kappa))
 
 
-def psi_alpha(alpha, tau):
-    """
-    psi_alpha(tau) from the RDP bound:
-
-        max{ 1/2 log(1+tau)
-             - 1/[2(alpha-1)] log((1+alpha tau)/(1+tau)),
-             -1/2 log(1+tau)
-             - 1/[2(alpha-1)] log(1 - tau(alpha-1)) }.
-
-    Requires alpha > 1 and 0 <= tau(alpha-1) < 1.
-    """
+def psi_alpha_tight(alpha: float, tau: float) -> float:
+    """Signed rank-two covariance contribution for one posterior draw."""
     if alpha <= 1.0:
-        raise ValueError("alpha must be greater than 1.")
+        raise ValueError("alpha must be greater than 1")
     if tau < 0.0:
-        raise ValueError("tau must be nonnegative.")
-
-    u = alpha - 1.0
-
+        raise ValueError("tau must be nonnegative")
     if tau == 0.0:
         return 0.0
 
-    if tau * u >= 1.0:
+    a = alpha - 1.0
+    if a * tau >= 1.0:
         return math.inf
-
-    log1ptau = math.log1p(tau)
-
-    term1 = (
-        0.5 * log1ptau
-        - (1.0 / (2.0 * u))
-        * (math.log1p(alpha * tau) - log1ptau)
-    )
-
-    term2 = (
-        -0.5 * log1ptau
-        - (1.0 / (2.0 * u)) * math.log1p(-tau * u)
-    )
-
-    return max(term1, term2)
+    argument = alpha * a * tau * tau / (1.0 + tau)
+    if argument >= 1.0:
+        return math.inf
+    return -math.log1p(-argument) / (2.0 * a)
 
 
-def rdp_bound_alpha_general(n, r, kappa, sigma, M_Y, alpha):
+def rdp_bound_tight(
+    *,
+    alpha: float,
+    v: float,
+    r: float,
+    sigma: float,
+    sensitivity: float,
+    eta: float = 0.0,
+    pointwise_sensitivity: float | None = None,
+) -> float:
+    """Return the tightened one-draw RDP bound.
+
+    ``pointwise_sensitivity`` activates the bounded-mean refinement.  It is
+    currently used only for the ordinary (eta=0) 1D exponential mechanism.
     """
-    Alpha-form one-sample-path RDP bound:
+    if r <= 0.0 or sigma <= 0.0:
+        raise ValueError("r and sigma must be positive")
+    if eta < 0.0 or sensitivity < 0.0:
+        raise ValueError("eta and sensitivity must be nonnegative")
+    if pointwise_sensitivity is not None and pointwise_sensitivity < 0.0:
+        raise ValueError("pointwise_sensitivity must be nonnegative")
 
-        2 psi_alpha(V_n(r)/r^2)
-        + alpha/2 * (V_n(r)+r^2)/(r^2-(alpha-1)V_n(r))
-          * (Delta_n(r)/sigma)^2.
-
-    The valid range is
-
-        1 < alpha < 1 + r^2 / V_n(r).
-    """
-    if sigma <= 0:
-        raise ValueError("sigma must be positive.")
-
-    v = v_n(n, r, kappa)
-    if v <= 0.0:
+    q = r * r
+    tau = sigma * sigma * v / (
+        sigma * sigma * q + eta * eta * (v + q)
+    )
+    if tau == 0.0:
         return 0.0
-
-    alpha_max = 1.0 + r**2 / v
-    if not (1.0 < alpha < alpha_max):
+    if not (1.0 < alpha < 1.0 + 1.0 / tau):
         return math.inf
 
-    tau = v / r**2
-    delta_n = delta_n_general(n, r, kappa, M_Y=M_Y)
+    covariance = psi_alpha_tight(alpha, tau)
+    a = alpha - 1.0
+    d2 = sensitivity * sensitivity
 
-    denom = r**2 - (alpha - 1.0) * v
-    if denom <= 0.0:
-        return math.inf
+    if pointwise_sensitivity is not None:
+        if eta != 0.0:
+            raise ValueError(
+                "the pointwise refinement is implemented only for eta=0"
+            )
+        denominator = q - a * v
+        if denominator <= 0.0:
+            return math.inf
+        directional2 = min(v * d2, pointwise_sensitivity**2)
+        mean = alpha / (2.0 * sigma * sigma) * (
+            d2 + alpha * directional2 / denominator
+        )
+    else:
+        denominator = (
+            sigma * sigma * (q - a * v)
+            + eta * eta * (v + q)
+        )
+        if denominator <= 0.0:
+            return math.inf
+        mean = alpha / 2.0 * (v + q) / denominator * d2
 
-    covariance_term = 2.0 * psi_alpha(alpha, tau)
-    mean_term = (
-        (alpha / 2.0)
-        * ((v + r**2) / denom)
-        * (delta_n / sigma) ** 2
+    return covariance + mean
+
+
+def _model_sensitivity(
+    *,
+    model: str,
+    n: int,
+    r: float,
+    kappa: float,
+    M_Y: float,
+    rkhs_norm: float | None,
+    sensitivity_tolerance: float,
+) -> tuple[float, float | None]:
+    if model == "generic":
+        return (
+            delta_n_generic(
+                n=n,
+                r=r,
+                kappa=kappa,
+                M_Y=M_Y,
+                tolerance=sensitivity_tolerance,
+            ),
+            None,
+        )
+    if model == "rkhs":
+        if rkhs_norm is None:
+            raise ValueError("rkhs_norm is required for model='rkhs'")
+        return delta_n_rkhs(n, r, kappa, rkhs_norm), None
+    if model == "exp_1d":
+        return delta_n_exp_1d(n, r, kappa, M_Y), 2.0 * M_Y
+    raise ValueError("model must be 'generic', 'rkhs', or 'exp_1d'")
+
+
+def _golden_section_minimize(
+    objective: Callable[[float], float],
+    left: float,
+    right: float,
+    tolerance: float,
+    max_iterations: int = 200,
+) -> tuple[float, float]:
+    inverse_phi = (math.sqrt(5.0) - 1.0) / 2.0
+    x1 = right - inverse_phi * (right - left)
+    x2 = left + inverse_phi * (right - left)
+    f1 = objective(x1)
+    f2 = objective(x2)
+
+    for _ in range(max_iterations):
+        if right - left <= tolerance:
+            break
+        if f1 > f2:
+            left = x1
+            x1, f1 = x2, f2
+            x2 = left + inverse_phi * (right - left)
+            f2 = objective(x2)
+        else:
+            right = x2
+            x2, f2 = x1, f1
+            x1 = right - inverse_phi * (right - left)
+            f1 = objective(x1)
+
+    minimizer = 0.5 * (left + right)
+    return objective(minimizer), minimizer
+
+
+def _minimize_over_beta(
+    objective: Callable[[float], float],
+    beta_safety: float,
+    grid_size: int,
+    xatol: float,
+) -> tuple[float, float]:
+    if not (0.0 < beta_safety < 0.5):
+        raise ValueError("beta_safety must lie in (0, 0.5)")
+    if grid_size < 12:
+        raise ValueError("grid_size must be at least 12")
+
+    lower = beta_safety
+    upper = 1.0 - beta_safety
+    split = min(0.1, upper)
+    geometric_count = max(6, grid_size // 2)
+    linear_count = max(6, grid_size - geometric_count)
+    grid = np.unique(
+        np.concatenate(
+            (
+                np.geomspace(lower, split, geometric_count),
+                np.linspace(split, upper, linear_count),
+            )
+        )
     )
-
-    return covariance_term + mean_term
-
-
-def fast_alpha_minimize(obj, alpha_min, alpha_max, grid_size=81):
-    """
-    Minimize a scalar objective over alpha in (alpha_min, alpha_max).
-    A coarse grid is followed by golden-section refinement.
-    """
-    if not (alpha_min < alpha_max):
-        raise ValueError("Require alpha_min < alpha_max.")
-    if grid_size < 3:
-        raise ValueError("grid_size must be at least 3.")
-
-    grid = np.linspace(alpha_min, alpha_max, grid_size)
-    values = np.array([obj(float(a)) for a in grid])
-
-    finite = np.isfinite(values)
-    if not np.any(finite):
+    values = np.asarray([objective(float(beta)) for beta in grid])
+    finite_indices = np.flatnonzero(np.isfinite(values))
+    if finite_indices.size == 0:
         return math.inf, math.nan
 
-    # Penalize non-finite values for choosing a local bracket.
-    values_for_argmin = values.copy()
-    values_for_argmin[~finite] = math.inf
-    best_idx = int(np.argmin(values_for_argmin))
+    ordered = finite_indices[np.argsort(values[finite_indices])]
+    candidates: list[tuple[float, float]] = [
+        (float(values[index]), float(grid[index])) for index in ordered[:5]
+    ]
+    for index in ordered[:5]:
+        lo = float(grid[max(0, index - 1)])
+        hi = float(grid[min(len(grid) - 1, index + 1)])
+        if hi > lo:
+            candidates.append(
+                _golden_section_minimize(
+                    objective,
+                    lo,
+                    hi,
+                    tolerance=xatol,
+                )
+            )
 
-    if best_idx == 0:
-        left, right = grid[0], grid[1]
-    elif best_idx == grid_size - 1:
-        left, right = grid[-2], grid[-1]
-    else:
-        left, right = grid[best_idx - 1], grid[best_idx + 1]
-
-    alpha_star, value_star = golden_section_minimize(obj, left, right)
-    return value_star, alpha_star
+    return min(candidates, key=lambda item: item[0])
 
 
-def epsilon_for_delta_alpha_general(
-    n,
-    r,
-    kappa,
-    sigma,
-    M_Y,
-    L,
-    delta,
-    alpha_safety=1e-8,
-    grid_size=81,
-):
-    """
-    Convert the alpha-form RDP bound to (epsilon, delta)-DP and optimize
-    over alpha:
-
-        epsilon(alpha) = L * RDP_alpha
-                         + log(1/delta)/(alpha-1).
-
-    Valid alpha range:
-
-        1 < alpha < 1 + r^2 / V_n(r).
-    """
+def improved_rdp_to_dp(
+    *,
+    alpha: float,
+    rdp_epsilon: float,
+    L: int,
+    delta: float,
+) -> float:
+    """Compose L RDP releases and apply the improved conversion."""
+    if alpha <= 1.0:
+        raise ValueError("alpha must be greater than 1")
+    if L < 1:
+        raise ValueError("L must be at least 1")
     if not (0.0 < delta < 1.0):
-        raise ValueError("delta must satisfy 0 < delta < 1.")
-    if L <= 0:
-        raise ValueError("L must be positive.")
+        raise ValueError("delta must lie in (0, 1)")
+    a = alpha - 1.0
+    return (
+        L * rdp_epsilon
+        + math.log(a / alpha)
+        - (math.log(delta) + math.log(alpha)) / a
+    )
+
+
+def epsilon_for_delta(
+    *,
+    n: int,
+    r: float,
+    kappa: float,
+    sigma: float,
+    L: int,
+    delta: float,
+    model: str,
+    M_Y: float = 1.0,
+    rkhs_norm: float | None = None,
+    eta: float = 0.0,
+    sensitivity_override: float | None = None,
+    beta_safety: float = 1e-8,
+    grid_size: int = 72,
+    xatol: float = 1e-7,
+    sensitivity_tolerance: float = 1e-10,
+    return_details: bool = False,
+) -> float | dict[str, float | str | tuple[float, float]]:
+    """Optimize the tightened RDP guarantee and improved conversion."""
+    _validate_common(n, r, kappa)
+    if sigma <= 0.0:
+        raise ValueError("sigma must be positive")
+    if eta < 0.0:
+        raise ValueError("eta must be nonnegative")
+    if M_Y < 0.0:
+        raise ValueError("M_Y must be nonnegative")
+    if not (0.0 < delta < 1.0):
+        raise ValueError("delta must lie in (0, 1)")
+    if L < 1:
+        raise ValueError("L must be at least 1")
+    if model not in {"generic", "rkhs", "exp_1d"}:
+        raise ValueError("model must be 'generic', 'rkhs', or 'exp_1d'")
+    if model == "exp_1d" and eta != 0.0:
+        raise ValueError("the exp_1d pointwise refinement requires eta=0")
 
     v = v_n(n, r, kappa)
-    delta_n_val = delta_n_general(n, r, kappa, M_Y=M_Y)
-
-    if v <= 0.0:
-        return {
-            "Case": "AlphaGeneral",
-            "Epsilon": 0.0,
-            "Delta": delta,
-            "OptimalAlpha": math.inf,
-            "RDPAtOptimalAlpha": 0.0,
-            "Vn": v,
-            "PhiN": phi_n(n, r, kappa),
-            "DeltaN": delta_n_val,
-            "Kappa": kappa,
-            "AlphaRange": (1.0, math.inf),
-        }
-
-    alpha_upper = 1.0 + r**2 / v
-    alpha_min = 1.0 + alpha_safety
-    alpha_max = alpha_upper - alpha_safety
-
-    if alpha_max <= alpha_min:
-        alpha_min = 1.0 + 0.1 * (alpha_upper - 1.0)
-        alpha_max = 1.0 + 0.9 * (alpha_upper - 1.0)
-
-    log_delta = math.log(1.0 / delta)
-
-    def obj(alpha):
-        rdp = rdp_bound_alpha_general(
+    if sensitivity_override is None:
+        sensitivity, pointwise = _model_sensitivity(
+            model=model,
             n=n,
             r=r,
             kappa=kappa,
-            sigma=sigma,
             M_Y=M_Y,
-            alpha=alpha,
+            rkhs_norm=rkhs_norm,
+            sensitivity_tolerance=sensitivity_tolerance,
         )
-        return L * rdp + log_delta / (alpha - 1.0)
+    else:
+        if sensitivity_override < 0.0:
+            raise ValueError("sensitivity_override must be nonnegative")
+        sensitivity = sensitivity_override
+        pointwise = 2.0 * M_Y if model == "exp_1d" else None
+    tau = tau_tilde(n, r, kappa, sigma, eta)
 
-    eps_star, alpha_star = fast_alpha_minimize(
-        obj,
-        alpha_min=alpha_min,
-        alpha_max=alpha_max,
+    if tau == 0.0:
+        details: dict[str, float | str | tuple[float, float]] = {
+            "Model": model,
+            "Epsilon": 0.0,
+            "Delta": delta,
+            "OptimalAlpha": math.inf,
+            "OptimalBeta": 0.0,
+            "RDPAtOptimalAlpha": 0.0,
+            "Vn": v,
+            "PhiN": phi_from_v(r, v),
+            "DeltaN": sensitivity,
+            "Tau": 0.0,
+            "AlphaRange": (1.0, math.inf),
+        }
+        return details if return_details else 0.0
+
+    def objective(beta: float) -> float:
+        alpha = 1.0 + beta / tau
+        rho = rdp_bound_tight(
+            alpha=alpha,
+            v=v,
+            r=r,
+            sigma=sigma,
+            sensitivity=sensitivity,
+            eta=eta,
+            pointwise_sensitivity=pointwise,
+        )
+        return improved_rdp_to_dp(
+            alpha=alpha,
+            rdp_epsilon=rho,
+            L=L,
+            delta=delta,
+        )
+
+    epsilon, beta = _minimize_over_beta(
+        objective,
+        beta_safety=beta_safety,
         grid_size=grid_size,
+        xatol=xatol,
     )
-
-    rdp_star = rdp_bound_alpha_general(
-        n=n,
+    epsilon = max(0.0, epsilon)
+    alpha = 1.0 + beta / tau
+    rho = rdp_bound_tight(
+        alpha=alpha,
+        v=v,
         r=r,
-        kappa=kappa,
         sigma=sigma,
-        M_Y=M_Y,
-        alpha=alpha_star,
+        sensitivity=sensitivity,
+        eta=eta,
+        pointwise_sensitivity=pointwise,
     )
 
-    return {
-        "Case": "AlphaGeneral",
-        "Epsilon": eps_star,
+    details = {
+        "Model": model,
+        "Epsilon": epsilon,
         "Delta": delta,
-        "OptimalAlpha": alpha_star,
-        "RDPAtOptimalAlpha": rdp_star,
+        "OptimalAlpha": alpha,
+        "OptimalBeta": beta,
+        "RDPAtOptimalAlpha": rho,
         "Vn": v,
-        "PhiN": phi_n(n, r, kappa),
-        "DeltaN": delta_n_val,
-        "Kappa": kappa,
-        "AlphaRange": (1.0, alpha_upper),
+        "PhiN": phi_from_v(r, v),
+        "DeltaN": sensitivity,
+        "Tau": tau,
+        "AlphaRange": (1.0, 1.0 + 1.0 / tau),
     }
+    return details if return_details else epsilon
 
 
-def epsilon_for_delta_exp_kernel_unit_square(
-    n,
-    ell,
-    r,
-    sigma,
-    M_Y=1.0,
-    L=1,
-    delta=None,
-    alpha_safety=1e-8,
-    grid_size=81,
-):
-    """
-    Convenience wrapper for the 2D unit-square exponential kernel
+def log10_epsilon_for_delta(**kwargs) -> float:
+    """Return log10 epsilon for contour plotting."""
+    kwargs["return_details"] = False
+    epsilon = float(epsilon_for_delta(**kwargs))
+    return math.log10(max(epsilon, np.finfo(float).tiny))
 
-        k(x,x') = exp(-||x-x'|| / ell),
 
-    for which kappa = exp(-sqrt(2)/ell). If delta is None, uses
-    delta = n^{-1.1}.
-    """
-    if delta is None:
-        delta = n ** (-1.1)
-
-    kappa = kappa_exp_kernel_unit_square(ell)
-
-    out = epsilon_for_delta_alpha_general(
-        n=n,
-        r=r,
-        kappa=kappa,
-        sigma=sigma,
-        M_Y=M_Y,
-        L=L,
-        delta=delta,
-        alpha_safety=alpha_safety,
-        grid_size=grid_size,
-    )
-
-    out["Case"] = "ExpKernelUnitSquare"
-    out["ell"] = ell
-    return out
+__all__ = [
+    "ACCOUNTANT_VERSION",
+    "delta_n_exp_1d",
+    "delta_n_generic",
+    "delta_n_rkhs",
+    "epsilon_for_delta",
+    "generic_sensitivity_components",
+    "improved_rdp_to_dp",
+    "log10_epsilon_for_delta",
+    "phi_from_v",
+    "phi_n",
+    "psi_alpha_tight",
+    "rdp_bound_tight",
+    "tau_tilde",
+    "v_n",
+]

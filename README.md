@@ -32,7 +32,7 @@ python lira_fhat_vhat_latent_gmm_exp1d_logv.py \
   --save-dir lira_exp1D_results
 ```
 To reproduce Figures 2 and 3 from the paper run the full workflow generating data and plots as follows:
-'''
+```
 chmod +x mia_submit.sh
 
 ./mia_submit.sh single
@@ -40,7 +40,7 @@ python lira_plots_updated.py --mode single
 
 ./mia_submit.sh composition
 python lira_plots_updated.py --mode composition
-'''
+```
 
 ## 1D Excursion Set Experiments
 Example: to recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 

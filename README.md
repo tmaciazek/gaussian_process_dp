@@ -5,6 +5,17 @@ Diﬀerential Privacy of Gaussian Process Posterior Sampling. Probing DP guarant
 
 This repository contains the main scripts used for the experiments in the paper. We are currently cleaning and documenting the remaining plotting and 2D-experiment scripts. They will be added in a subsequent update.
 
+## Plotting approximate-DP Bounds
+
+To reproduce Figure 1 from the paper run:
+```
+python plot_dp_contours.py
+```
+and to reproduce Figure 5 from Appendix B.5 showing how many sample paths can be released at a given provacy budget run for example:
+```
+python plot_lmax_contours.py --epsilon-budget 10.0
+```
+
 ## LiRA Membership Inference Attack
 
 Example: to recreate the LiRA attack results for $r=0.1$, $\sigma=0.5$ and $L=3$ posterior draws run the following command:

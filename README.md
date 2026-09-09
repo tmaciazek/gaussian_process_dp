@@ -55,8 +55,7 @@ python "plot_lira_shadow_histograms.py" \
   --n-shadow 10000 \
   --seed 0 \
   --dp-n 10 \
-  --dp-delta 0.05 \
-  --dp-eta 0 \
+  --dp-delta 0.001 \
   --dp-grid-size 31 \
   --bins 55 \
   --n-cols 3 \

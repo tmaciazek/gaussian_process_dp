@@ -12,6 +12,14 @@ except Exception:  # pragma: no cover
     plt = None
 
 
+def _trapezoid(y: np.ndarray, x: np.ndarray) -> float:
+    """NumPy-version-compatible trapezoidal integration."""
+    trap = getattr(np, "trapezoid", None)
+    if trap is None:
+        trap = np.trapz
+    return float(trap(y, x))
+
+
 # ============================================================
 # Kernel, labels, and posterior quantities
 # ============================================================
@@ -633,7 +641,7 @@ def latent_gmm2_logpdf_fft_convolution(
             density_floor=density_floor,
         )
     )
-    mu_area = float(np.trapezoid(mu_density, grid))
+    mu_area = _trapezoid(mu_density, grid)
     if not np.isfinite(mu_area) or mu_area <= 0.0:
         return np.full(x.shape, np.log(density_floor), dtype=float)
     mu_density /= mu_area
@@ -645,7 +653,7 @@ def latent_gmm2_logpdf_fft_convolution(
 
     conv_density = signal.fftconvolve(mu_density, kernel, mode='same') * dx
     conv_density = np.maximum(conv_density, density_floor)
-    conv_area = float(np.trapezoid(conv_density, grid))
+    conv_area = _trapezoid(conv_density, grid)
     if np.isfinite(conv_area) and conv_area > 0.0:
         conv_density /= conv_area
 
@@ -1081,8 +1089,8 @@ def released_sample_mean_and_variance_at_x0(
     """
     if n_posterior_draws < 1:
         raise ValueError("n_posterior_draws must be positive.")
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        raise ValueError("This f_hat/v_hat experiment requires finite sigma > 0.")
+    if np.isnan(sigma) or sigma <= 0.0 or np.isneginf(sigma):
+        raise ValueError("This f_hat/v_hat experiment requires sigma > 0 or sigma=inf.")
 
     mu0, v0 = posterior_mean_and_normalized_variance_at_x0(
         x_train=x_train,
@@ -1093,7 +1101,20 @@ def released_sample_mean_and_variance_at_x0(
         jitter=jitter,
     )
 
-    draws = mu0 + sigma * np.sqrt(max(v0, 0.0)) * rng.normal(size=n_posterior_draws)
+    z = rng.normal(size=n_posterior_draws)
+    scale = np.sqrt(max(v0, 0.0))
+    if np.isposinf(sigma):
+        # Covariance-only limit sigma -> infinity.  For finite sigma, dividing
+        # every released value by the public constant sigma is an invertible,
+        # data-independent transformation and hence leaves the optimal MIA ROC
+        # unchanged.  The scaled release converges to sqrt(v0) * Z because
+        # mu0 / sigma -> 0.  We simulate that finite limit directly.
+        draws = scale * z
+        variance_normalizer = 1.0
+    else:
+        draws = mu0 + sigma * scale * z
+        variance_normalizer = sigma**2
+
     f_hat = float(np.mean(draws))
 
     # For L = 1 the empirical variance around the sample mean is not a usable
@@ -1102,7 +1123,7 @@ def released_sample_mean_and_variance_at_x0(
     if n_posterior_draws == 1:
         v_hat = np.nan
     else:
-        v_hat = float(np.sum((draws - f_hat) ** 2) / (n_posterior_draws * sigma**2))
+        v_hat = float(np.sum((draws - f_hat) ** 2) / (n_posterior_draws * variance_normalizer))
         v_hat = max(v_hat, 0.0)
 
     return f_hat, v_hat, float(mu0), float(v0)
@@ -1244,8 +1265,8 @@ def _metrics(scores_in: np.ndarray, scores_out: np.ndarray) -> Dict[str, float]:
 def run_experiment(cfg: Config) -> Dict[str, object]:
     rng = np.random.default_rng(cfg.seed)
 
-    if not np.isfinite(cfg.sigma) or cfg.sigma <= 0.0:
-        raise ValueError("This experiment requires finite --sigma > 0 because v_hat divides by sigma^2.")
+    if np.isnan(cfg.sigma) or cfg.sigma <= 0.0 or np.isneginf(cfg.sigma):
+        raise ValueError("This experiment requires --sigma > 0 or --sigma inf.")
 
     use_vhat = cfg.n_posterior_draws > 1
 
@@ -1421,7 +1442,11 @@ def print_result(res: Dict[str, object]) -> None:
         f"n_shadow={cfg.n_shadow}, n_eval={cfg.n_eval}, seed={cfg.seed}"
     )
     print("Statistics:")
-    print("  f_hat(x0) = L^{-1} sum_l f_D^{(l)}(x0)")
+    if np.isposinf(cfg.sigma):
+        print("  sigma=inf: using the covariance-only scaled limit f_D(x0)/sigma -> sqrt(v0) Z")
+        print("  f_hat(x0) = L^{-1} sum_l [f_D^{(l)}(x0)/sigma] in the sigma->inf limit")
+    else:
+        print("  f_hat(x0) = L^{-1} sum_l f_D^{(l)}(x0)")
     if use_vhat:
         print("  v_hat(x0) = (L sigma^2)^{-1} sum_l (f_D^{(l)}(x0) - f_hat(x0))^2")
         print("Combined score: LLR_f_hat + LLR_v_hat")
@@ -1639,7 +1664,7 @@ def parse_args() -> Config:
     parser.add_argument("--x0", type=float, default=0.5, help="Candidate point for membership inference")
     parser.add_argument("--ell", type=float, default=0.2, help="Exponential-kernel lengthscale")
     parser.add_argument("--r", type=float, default=0.5, help="Regularization parameter")
-    parser.add_argument("--sigma", type=float, default=0.5, help="Finite posterior sample-path scale; must be > 0")
+    parser.add_argument("--sigma", type=float, default=0.5, help="Posterior sample-path scale: sigma > 0, or inf for the covariance-only limit")
     parser.add_argument("--m-eps", type=float, default=0.0, help="Label-noise level")
     parser.add_argument("--n-posterior-draws", type=int, default=1, help="Number L of posterior draws")
     parser.add_argument("--n-shadow", type=int, default=10000, help="Number of shadow datasets per hypothesis")

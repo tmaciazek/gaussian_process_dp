@@ -42,6 +42,30 @@ python lira_plots_updated.py --mode single
 python lira_plots_updated.py --mode composition
 ```
 
+To reproduce the histograms from Figure 7 run
+```
+python "plot_lira_shadow_histograms.py" \
+  --lira-script lira_fhat_vhat_latent_gmm_exp1d_logv.py \
+  --pairs "0.1,0.5;0.1,100;2,0.5" \
+  --n 10 \
+  --x0 0.5 \
+  --ell 1 \
+  --m-eps 0 \
+  --L 3 \
+  --n-shadow 10000 \
+  --seed 0 \
+  --dp-n 10 \
+  --dp-delta 0.05 \
+  --dp-eta 0 \
+  --dp-grid-size 31 \
+  --bins 55 \
+  --n-cols 3 \
+  --no-share-x \
+  --out-dir mia_histograms \
+  --basename lira_histograms \
+  --formats pdf,png
+```
+
 ## 1D Excursion Set Experiments
 Example: to recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
 ```

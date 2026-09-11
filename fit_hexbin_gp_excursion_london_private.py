@@ -42,7 +42,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -53,10 +55,28 @@ from matplotlib.lines import Line2D
 from scipy.linalg import cho_factor, cho_solve, solve_triangular
 from scipy.special import ndtr
 from scipy.spatial import cKDTree
+
 try:
-    from dp_utils import epsilon_for_delta_exp_kernel_unit_square
-except ImportError:  # fallback for the beta-parametrized helper file used in earlier runs
-    from dp_utils_beta import epsilon_for_delta_exp_kernel_unit_square
+    import dp_utils
+except ImportError as exc:
+    raise ImportError(
+        "Could not import dp_utils.py. Put the tightened dp_utils.py beside "
+        "this script (or on PYTHONPATH)."
+    ) from exc
+
+
+REQUIRED_DP_ACCOUNTANT_VERSION = "tight-rdp-2026-09"
+DP_MODEL = "generic"
+DP_ETA = 0.0
+DP_KAPPA_FORMULA = "exp(-sqrt(2)/ell)"
+
+if getattr(dp_utils, "ACCOUNTANT_VERSION", None) != REQUIRED_DP_ACCOUNTANT_VERSION:
+    raise ImportError(
+        "This script requires the tightened dp_utils.py accountant "
+        f"({REQUIRED_DP_ACCOUNTANT_VERSION!r}); found "
+        f"{getattr(dp_utils, 'ACCOUNTANT_VERSION', None)!r}. Put the current "
+        "dp_utils.py beside this script (or on PYTHONPATH)."
+    )
 
 
 PPD_COLUMNS = [
@@ -408,6 +428,34 @@ def parse_grid(s: str) -> list[float]:
 # ---------------------------------------------------------------------
 
 
+def exp_kernel_unit_square_kappa(ell: float) -> float:
+    """Return inf_{x,z in [0,1]^2} exp(-||x-z||/ell)."""
+    if ell <= 0.0:
+        raise ValueError("ell must be positive for DP accounting.")
+    return math.exp(-math.sqrt(2.0) / float(ell))
+
+
+@lru_cache(maxsize=None)
+def _generic_sensitivity_components_cached(
+    n: int,
+    ell: float,
+    r: float,
+    M_Y: float,
+) -> tuple[float, float, float]:
+    """Cache the sigma-independent tightened generic sensitivities."""
+    components = dp_utils.generic_sensitivity_components(
+        n=int(n),
+        r=float(r),
+        kappa=exp_kernel_unit_square_kappa(float(ell)),
+        M_Y=float(M_Y),
+    )
+    return (
+        float(components["coupled"]),
+        float(components["operator"]),
+        float(components["minimum"]),
+    )
+
+
 def dp_epsilon_for_params(
     n: int,
     ell: float,
@@ -419,29 +467,78 @@ def dp_epsilon_for_params(
     alpha_grid_size: int,
 ) -> float:
     """
-    Epsilon for one parameter triple using exactly the same helper as the
-    synthetic 2D experiment:
+    Return epsilon from the tightened generic-response accountant.
 
-        epsilon_for_delta_exp_kernel_unit_square(
-            n=n, ell=ell, r=r, sigma=sigma, M_Y=M_Y, L=L,
-            delta=delta, grid_size=alpha_grid_size,
-        )
-
-    Coordinates are normalised to [0,1]^2 before GP fitting, so this applies
-    the same unit-square 2D exponential-kernel bound as in
-    run_2d_excursion_gp_private_sigmoid_smoothed.py.
+    Coordinates are normalised to [0,1]^2, so for the exponential kernel the
+    global lower bound is kappa=exp(-sqrt(2)/ell). The one-dimensional
+    exponential-kernel refinement is not valid for this spatial model.
     """
-    out = epsilon_for_delta_exp_kernel_unit_square(
-        n=n,
-        ell=ell,
-        r=r,
-        sigma=sigma,
-        M_Y=M_Y,
-        L=L,
-        delta=delta,
-        grid_size=alpha_grid_size,
+    kappa = exp_kernel_unit_square_kappa(float(ell))
+    _, _, sensitivity = _generic_sensitivity_components_cached(
+        int(n), float(ell), float(r), float(M_Y)
     )
-    return float(out["Epsilon"])
+    return float(
+        dp_utils.epsilon_for_delta(
+            n=int(n),
+            r=float(r),
+            kappa=kappa,
+            sigma=float(sigma),
+            M_Y=float(M_Y),
+            L=int(L),
+            delta=float(delta),
+            model=DP_MODEL,
+            eta=DP_ETA,
+            sensitivity_override=sensitivity,
+            grid_size=int(alpha_grid_size),
+            return_details=False,
+        )
+    )
+
+
+def dp_epsilon_details_for_params(
+    n: int,
+    ell: float,
+    r: float,
+    sigma: float,
+    M_Y: float,
+    L: int,
+    delta: float,
+    alpha_grid_size: int,
+) -> dict:
+    """Return epsilon together with auditable tightened-accountant details."""
+    kappa = exp_kernel_unit_square_kappa(float(ell))
+    coupled, operator, sensitivity = _generic_sensitivity_components_cached(
+        int(n), float(ell), float(r), float(M_Y)
+    )
+    source = "coupled" if coupled <= operator else "operator"
+    details = dict(
+        dp_utils.epsilon_for_delta(
+            n=int(n),
+            r=float(r),
+            kappa=kappa,
+            sigma=float(sigma),
+            M_Y=float(M_Y),
+            L=int(L),
+            delta=float(delta),
+            model=DP_MODEL,
+            eta=DP_ETA,
+            sensitivity_override=sensitivity,
+            grid_size=int(alpha_grid_size),
+            return_details=True,
+        )
+    )
+    details.update(
+        {
+            "AccountantVersion": dp_utils.ACCOUNTANT_VERSION,
+            "Domain": "[0,1]^2",
+            "Kappa": kappa,
+            "KappaFormula": DP_KAPPA_FORMULA,
+            "SensitivitySource": source,
+            "SensitivityCoupled": coupled,
+            "SensitivityOperator": operator,
+        }
+    )
+    return details
 
 
 def make_candidate_grid(ell_grid, r_grid, sigma_grid) -> list[tuple[float, float, float]]:
@@ -498,8 +595,9 @@ def evaluate_candidates_bce_on_split(
 ) -> tuple[dict, pd.DataFrame]:
     """
     Evaluate candidate triples by validation BCE. If epsilon0 is not None,
-    discard triples with epsilon >= epsilon0. The epsilon calculation is the
-    same unit-square 2D exponential-kernel formula used in the synthetic script.
+    discard triples with epsilon >= epsilon0. Privacy is evaluated with the
+    tightened generic-response accountant for the exponential kernel on
+    the normalised unit-square domain.
     """
     Xtr, ytr = X[train_idx], y[train_idx]
     Xva = X[val_idx]
@@ -1012,7 +1110,15 @@ def main() -> None:
         help="Deprecated compatibility option. The script now fixes M_Y=1 after response rescaling.",
     )
     parser.add_argument("--L", type=int, default=1, help="Number of released posterior draws/sets in the DP accounting.")
-    parser.add_argument("--alpha-grid-size", type=int, default=81, help="Alpha grid size for epsilon optimization.")
+    parser.add_argument(
+        "--alpha-grid-size",
+        type=int,
+        default=81,
+        help=(
+            "Initial beta-grid size used by the tightened epsilon optimizer "
+            "(option name retained for command-line compatibility)."
+        ),
+    )
     parser.add_argument(
         "--private-ell-grid",
         default="0.05,0.10,0.14,0.18,0.24,0.35,0.45",
@@ -1201,8 +1307,8 @@ def main() -> None:
     print(f"Selected public C by validation IoU: C={C_best:.4f}, val_iou={C_iou:.4f}")
 
     # ------------------------------------------------------------------
-    # DP-constrained private grid search, with the same epsilon formula as
-    # run_2d_excursion_gp_private_sigmoid_smoothed.py.
+    # DP-constrained private grid search using the tightened generic-response
+    # RDP bound and improved RDP-to-DP conversion from dp_utils.py.
     # ------------------------------------------------------------------
     delta = args.delta if args.delta is not None else len(hex_df) ** (-1.1)
     if not (0.0 < delta < 1.0):
@@ -1215,6 +1321,11 @@ def main() -> None:
     private_sigma_grid = parse_grid(args.private_sigma_grid)
 
     print("DP accounting parameters:")
+    print(f"  accountant = {dp_utils.ACCOUNTANT_VERSION}")
+    print(f"  model = {DP_MODEL}")
+    print(f"  domain = [0,1]^2")
+    print(f"  kappa(ell) = {DP_KAPPA_FORMULA}")
+    print(f"  eta = {DP_ETA:g}")
     print(f"  n = {len(hex_df):,} hexagon records")
     print(f"  M_Y = {M_Y_DP:.6g}  # after symmetric response rescaling")
     print(f"  response scale B = {B:.6g}")
@@ -1245,6 +1356,16 @@ def main() -> None:
     private_coarse_results = private_search["coarse_results"]
     private_refined_results = private_search["refined_results"]
     private_best = private_search["refined_best"]
+    private_dp_details = dp_epsilon_details_for_params(
+        n=len(hex_df),
+        ell=private_best["ell"],
+        r=private_best["r"],
+        sigma=private_best["sigma"],
+        M_Y=M_Y_DP,
+        L=args.L,
+        delta=delta,
+        alpha_grid_size=args.alpha_grid_size,
+    )
     private_coarse_results.to_csv(args.out_private_coarse_gridsearch, index=False)
     private_refined_results.to_csv(args.out_private_gridsearch, index=False)
     print(f"Saved private coarse grid-search table to {args.out_private_coarse_gridsearch}")
@@ -1254,6 +1375,12 @@ def main() -> None:
         f"ell={private_best['ell']:.6g}, r={private_best['r']:.6g}, sigma={private_best['sigma']:.6g}, "
         f"epsilon={private_best['epsilon']:.6g}, val_bce={private_best['val_bce']:.6f}, "
         f"val_iou@0.5={private_best['val_iou_at_0p5']:.4f}"
+    )
+    print(
+        "  tightened sensitivity = "
+        f"{private_dp_details['DeltaN']:.6g} "
+        f"({private_dp_details['SensitivitySource']}); "
+        f"optimal alpha = {private_dp_details['OptimalAlpha']:.6g}"
     )
 
     C_private, C_private_iou, C_private_results = choose_C_by_validation_iou(
@@ -1417,13 +1544,22 @@ def main() -> None:
         "prediction_grid_kept_fraction": float(support_mask.mean()),
         "path_grid_kept_fraction": float(path_support_mask.mean()),
         "dp_accounting": {
+            "accountant_version": dp_utils.ACCOUNTANT_VERSION,
+            "model": DP_MODEL,
+            "eta": DP_ETA,
+            "domain": "[0,1]^2",
+            "kappa_formula": DP_KAPPA_FORMULA,
+            "covariance_bound": "signed rank-two",
+            "sensitivity_bound": "min(coupled, operator)",
+            "conversion": "improved RDP-to-DP",
             "epsilon0": float(args.epsilon0),
             "delta": float(delta),
             "M_Y": float(M_Y_DP),
             "L": int(args.L),
-            "alpha_grid_size": int(args.alpha_grid_size),
-            "epsilon_formula": "epsilon_for_delta_exp_kernel_unit_square(n, ell, r, sigma, M_Y, L, delta, grid_size)",
+            "optimizer_grid_size": int(args.alpha_grid_size),
+            "epsilon_function": "dp_utils.epsilon_for_delta",
             "n_for_epsilon": int(len(hex_df)),
+            "selected_private_details": private_dp_details,
         },
         "public_best_hyperparameters_by_bce": {
             "ell": float(best["ell"]),

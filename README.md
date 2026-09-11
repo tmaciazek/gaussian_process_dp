@@ -110,7 +110,7 @@ python fit_hexbin_gp_excursion_london_private.py \
   --L 1 \
   --out-figure london_hexbin_gp_public_excursion.png \
   --out-private-figure london_hexbin_gp_private_excursion.png \
-  --out-summary london_hexbin_gp_private_summary.json \
+  --out-summary london_hexbin_gp_summary.json \
   --no-show
 ```
 Then, apply those hyperparameters to find the excursion set for 2018 data as follows:

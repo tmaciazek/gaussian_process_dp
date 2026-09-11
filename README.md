@@ -68,7 +68,7 @@ python "plot_lira_shadow_histograms.py" \
 ## 1D Excursion Set Experiments
 Example: to recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
 ```
-python prior_average_gridsearch_exp_excursion_set_bce_L_release.py    --n-train 100 --n-target-grid 800 \
+python prior_average_gridsearch_exp_excursion_set_bce_L_release.py --n-target-grid 800 \
     --ell-true 1. \
     --ell-model 0.05,0.08,0.13,0.2,0.25,0.35,0.5,0.6,0.75 \
     --r-values 0.1,0.2,0.5,1,2,5,6,7 \
@@ -83,7 +83,7 @@ python prior_average_gridsearch_exp_excursion_set_bce_L_release.py    --n-train 
     --target-reject-volume-min 0.1 \
     --target-reject-volume-max 0.9 \
     --target-reject-max-components 13 \
-    --target-reject-min-mean-component-width 0.05 --epsilon-delta 0.001 --n-pairs 100 --n-train 100
+    --target-reject-min-mean-component-width 0.05 --epsilon-delta 0.001 --n-pairs 1000 --n-train 100
 ```
 
 ## 2D Excursion Set Experiments

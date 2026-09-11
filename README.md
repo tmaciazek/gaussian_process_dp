@@ -66,7 +66,7 @@ python "plot_lira_shadow_histograms.py" \
 ```
 
 ## 1D Excursion Set Experiments
-Example: to recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
+To recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
 ```
 python prior_average_gridsearch_exp_excursion_set_bce_L_release.py --n-target-grid 800 \
     --ell-true 1. \
@@ -87,9 +87,13 @@ python prior_average_gridsearch_exp_excursion_set_bce_L_release.py --n-target-gr
 ```
 
 ## 2D Excursion Set Experiments
-Example: to recreate the 2D excurion set results for $M_\xi=0.5$ just set `--M-xi 0.5` below. 
+To recreate the 2D excurion set results for $M_\xi=0.5$ just set `--M-xi 0.5` below. 
 ```
 python run_2d_excursion_gp_private_sigmoid_smoothed.py --M-xi 0.5
+```
+Then, to reproduce the corresponding column of Table 4 in Appendix D run 
+```
+python summarise_fixed_2d_excursion_hyperparams.py --M-xi 0.5
 ```
 
 ## London Property Sales Experiment

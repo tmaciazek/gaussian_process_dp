@@ -23,9 +23,9 @@ from matplotlib import cm, patheffects, ticker
 
 
 def _load_dp_utils() -> ModuleType:
-    """Load the tightened sibling utility despite attachment-name suffixes."""
+    """Load the tightened utility module."""
     directory = Path(__file__).resolve().parent
-    candidates = ("dp_utils(3).py", "dp_utils.py", "dp_rdp_utils.py")
+    candidates = ("dp_utils.py", )
     for filename in candidates:
         path = directory / filename
         if path.is_file():
@@ -203,14 +203,11 @@ def _add_epsilon_panel(
             label_artists = ax.clabel(
                 contours,
                 fmt=labels,
-                # Do not delete a long section of the contour beneath each
-                # label.  This is especially conspicuous on logarithmic axes.
                 inline=False,
                 fontsize=12,
             )
             for label in label_artists:
-                # A narrow halo keeps the text legible while masking only the
-                # line immediately adjacent to each glyph.
+                # A narrow halo keeps the text legible
                 label.set_path_effects(
                     [
                         patheffects.Stroke(linewidth=10, foreground="white"),

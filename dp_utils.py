@@ -1,16 +1,11 @@
-"""Tight DP accounting utilities for GP posterior sampling.
-
-Only the tightened bounds are implemented:
+"""DP accounting utilities for GP posterior sampling.
 
 * the signed rank-two covariance term;
 * the improved RDP-to-DP conversion;
-* the minimum of the coupled and operator generic sensitivities;
-* the factor-two-improved fixed-RKHS-response sensitivity; and
 * the bounded-mean refinement for the 1D exponential kernel.
 
 The optional ``eta`` parameter is the scale of an independent draw from the
-GP prior added to the posterior draw.  For ``eta > 0`` the tightened enhanced
-mechanism bound is used.
+GP prior added to the posterior draw. 
 """
 
 from __future__ import annotations

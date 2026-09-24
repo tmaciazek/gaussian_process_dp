@@ -1,7 +1,7 @@
 """Plot capped release counts using the tightened GP-posterior accountant.
 
 The three panels use, respectively, the improved generic bounded-response
-sensitivity, the halved fixed-RKHS-response sensitivity, and the specialized
+sensitivity, the improved fixed-RKHS-response sensitivity and the specialized
 one-dimensional exponential-kernel sensitivity and mean-term refinement.
 All RDP evaluation and RDP-to-DP conversion is delegated to ``dp_utils.py``.
 """
@@ -133,12 +133,6 @@ def find_lmax(
         0 if even L=1 is infeasible; otherwise the largest feasible L found.
     capped:
         True when L=L_cap is feasible, so the true L_max may exceed L_cap.
-
-    Notes
-    -----
-    The search assumes epsilon_L is nondecreasing in L, as implied by additive
-    RDP composition followed by optimal conversion to (epsilon, delta)-DP.
-    Exceptions from the epsilon routine are treated conservatively as infeasible.
     """
     if epsilon_budget <= 0:
         raise ValueError("epsilon_budget must be positive.")
@@ -313,10 +307,7 @@ def choose_contour_label_position(
     edge_margin: float = 0.08,
 ) -> tuple[float, float] | None:
     """
-    Choose an interior label position on a one-level contour set.
-
-    Selection is performed in log10 coordinates so that placement is natural
-    on the logarithmic axes. Points close to the axes are excluded.
+    Choose an interior label position on a one-level contour set. Points close to the axes are excluded.
     """
     if not getattr(contours, "allsegs", None):
         return None

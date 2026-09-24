@@ -206,7 +206,7 @@ def delta_n_exp_1d(
     """Return the O(1) 1D-exponential sensitivity 4 M_Y sqrt(Phi_n)."""
     if M_Y < 0.0:
         raise ValueError("M_Y must be nonnegative")
-    return 2.0 * M_Y * math.sqrt(phi_n(n, r, kappa))
+    return 4.0 * M_Y * math.sqrt(phi_n(n, r, kappa))
 
 
 def psi_alpha_tight(alpha: float, tau: float) -> float:

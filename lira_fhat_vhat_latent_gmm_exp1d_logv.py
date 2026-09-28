@@ -45,6 +45,7 @@ def solve_spd(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 
 
 def threshold_labels(x: np.ndarray) -> np.ndarray:
+    """Step-function labels"""
     x = np.asarray(x, dtype=float)
     return np.where(x < 0.5, -1.0, 1.0)
 

@@ -14,7 +14,7 @@ set -euo pipefail
 
 MODE="${1:-}"
 PYTHON="${PYTHON:-python}"
-ATTACK_SCRIPT="${ATTACK_SCRIPT:-lira_fhat_vhat_latent_gmm_exp1d_logv.py}"
+ATTACK_SCRIPT="${ATTACK_SCRIPT:-lira_fhat_vhat_latent_gmm_exp1d.py}"
 N_SHADOW="${N_SHADOW:-10000}"
 N_EVAL="${N_EVAL:-10000}"
 

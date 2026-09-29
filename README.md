@@ -45,7 +45,7 @@ python lira_plots_updated.py --mode composition
 To reproduce the histograms from Figure 7 run
 ```
 python "plot_lira_shadow_histograms.py" \
-  --lira-script lira_fhat_vhat_latent_gmm_exp1d_logv.py \
+  --lira-script lira_fhat_vhat_latent_gmm_exp1d.py \
   --pairs "0.1,0.5;0.1,100;2,0.5" \
   --n 10 \
   --x0 0.5 \

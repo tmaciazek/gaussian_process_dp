@@ -250,8 +250,7 @@ def sample_fixed_target_and_trials_joint_ou(
       4. if accepted, keep both the target-grid values and the corresponding
          exact latent training values, then add independent uniform noise.
 
-    Thus y_clean is no longer obtained by interpolation from the grid; it is the
-    exact finite-dimensional OU draw at the random training covariates. The
+    Thus y_clean  is the exact finite-dimensional OU draw at the random training covariates. The
     latent target itself is left on its original GP scale. Its sup-norm in the
     bounded-response model is approximated on the union of the target mesh and
     all sampled training locations. This guarantees that every simulated

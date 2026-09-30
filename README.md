@@ -102,7 +102,7 @@ python fit_hexbin_gp_excursion_london_private.py \
   --ppd pp-2017.csv \
   --postcode-lookup ONSPD.csv \
   --threshold 13.0 \
-  --gridsize 80 \
+  --gridsize 100 \
   --mincnt 1 \
   --epsilon0 10 \
   --M-Y 1.0 \
@@ -119,7 +119,7 @@ python fit_hexbin_gp_excursion_london_private_json.py \
   --postcode-lookup ONSPD.csv \
   --threshold 13.0 \
   --response-scale 1.0 \
-  --gridsize 80 \
+  --gridsize 100 \
   --mincnt 1 \
   --n-sample-paths 3 \
   --path-grid-size 60 \

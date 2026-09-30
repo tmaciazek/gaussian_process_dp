@@ -78,7 +78,6 @@ python gridsearch_1Dexp_excursion_set_bce_L_release.py --n-target-grid 800 \
     --m-eps 0.5 \
     --threshold 0.0 \
     --epsilon-threshold 9 \
-    --seed 6 \
     --target-reject \
     --target-reject-volume-min 0.1 \
     --target-reject-volume-max 0.9 \

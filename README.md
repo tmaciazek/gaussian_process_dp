@@ -44,7 +44,7 @@ python lira_plots_updated.py --mode composition
 
 To reproduce the histograms from Figure 7 run
 ```
-python "plot_lira_shadow_histograms.py" \
+python plot_lira_shadow_histograms.py \
   --lira-script lira_fhat_vhat_latent_gmm_exp1d.py \
   --pairs "0.1,0.5;0.1,100;2,0.5" \
   --n 10 \
@@ -68,7 +68,7 @@ python "plot_lira_shadow_histograms.py" \
 ## 1D Excursion Set Experiments
 To recreate the 1D excurion set results for $M_\xi=0.5$ just set `--m-eps 0.5` below. 
 ```
-python prior_average_gridsearch_exp_excursion_set_bce_L_release.py --n-target-grid 800 \
+python gridsearch_1Dexp_excursion_set_bce_L_release.py --n-target-grid 800 \
     --ell-true 1. \
     --ell-model 0.05,0.08,0.13,0.2,0.25,0.35,0.5,0.6,0.75 \
     --r-values 0.1,0.2,0.5,1,2,5,6,7 \

@@ -100,7 +100,7 @@ First download the [Price Paid Data](https://www.gov.uk/government/statistical-d
 ```
 python fit_hexbin_gp_excursion_london_private.py \
   --ppd pp-2017.csv \
-  --postcode-lookup NSPL.csv \
+  --postcode-lookup ONSPD.csv \
   --threshold 13.0 \
   --gridsize 40 \
   --mincnt 1 \
@@ -116,7 +116,7 @@ Then, apply those hyperparameters to find the excursion set for 2018 data as fol
 ```
 python fit_hexbin_gp_excursion_london_private_json.py \
   --ppd pp-2018.csv \
-  --postcode-lookup NSPL.csv \
+  --postcode-lookup ONSPD.csv \
   --threshold 13.0 \
   --response-scale 1.0 \
   --gridsize 40 \

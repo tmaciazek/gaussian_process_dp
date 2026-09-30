@@ -2,23 +2,19 @@
 """Recalculate one M_xi column of the paper's 1D excursion-set table.
 
 The coarse-to-refined search evaluates one global hyperparameter setting over
-independent (D,f_*) pairs. Candidates are ranked by average analytic BCE. The
-reported references use the requested secondary selection:
-
-* unconstrained: lowest epsilon among the three best average-BCE candidates;
-* private: highest estimated one-path IoU among the three best average-BCE
-  candidates satisfying epsilon < epsilon_0.
+independent (D,f_*) pairs. 
 
 The cutoff C for the unconstrained analytic probability map is selected on a
 separate validation sample. By default a one-path release is thresholded at
-c=t; optionally, a path-value threshold c is selected on that separate
+c=t. Optionally, a path-value threshold c is selected on that separate
 validation sample. For each main pair, the private one-path utility is estimated
-from repeated independent draws from the posterior; these repetitions do not
-compose privacy. The script reports medians and interquartile ranges of the
-pair-level quantities and writes a copy-ready one-column LaTeX table.
+from repeated independent draws from the posterior. 
+
+The script reports medians and interquartile ranges of the
+pair-level quantities.
 
 Privacy is calculated through the tightened 1D-exponential accountant in
-dp_utils.py, including the improved RDP bound and RDP-to-DP conversion.
+dp_utils.py
 """
 
 from __future__ import annotations

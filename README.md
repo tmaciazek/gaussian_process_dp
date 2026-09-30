@@ -128,5 +128,5 @@ python fit_hexbin_gp_excursion_london_private_json.py \
   --mincnt 1 \
   --n-sample-paths 3 \
   --path-grid-size 60 \
-  --path-seed 123
+  --path-seed 0
 ```

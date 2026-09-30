@@ -15,17 +15,6 @@ Pipeline:
   8. Select excursion probability cutoff C by validation IoU.
   9. Refit on all hexagons and release/plot the boundary of {p_D(x) >= C}.
 
-Example:
-  python fit_hexbin_gp_excursion_london.py \
-      --ppd pp-2018.csv \
-      --postcode-lookup ONSPD.csv \
-      --threshold 13.5 \
-      --gridsize 40 \
-      --mincnt 1 \
-      --out-figure london_hexbin_gp_excursion.png \
-      --out-boundary london_hexbin_gp_boundary.csv \
-      --out-summary london_hexbin_gp_summary.json
-
 Notes:
   - Coordinates are normalised to [0,1]^2 for GP fitting, so lengthscales are in
     units of the normalised Greater London bounding box.

@@ -96,7 +96,12 @@ python summarise_fixed_2d_excursion_hyperparams.py --M-xi 0.5
 ```
 
 ## London Property Sales Experiment
-First download the [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) from 2018 and 2017. Then, download the [postcode lookup table](https://geoportal.statistics.gov.uk/datasets/6fff67d204fd4f339591ed667a6e3642/about). If the property sales data is `pp-2017.csv` and the postcode lookup table is in the file `NSPL.csv` then to fit the GP hyperparameters run:
+First download the [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) from 2018 and 2017. Then, download the [postcode lookup table](https://geoportal.statistics.gov.uk/datasets/6fff67d204fd4f339591ed667a6e3642/about). If the property sales data is `pp-2017.csv` and the postcode lookup table is in the file `NSPL.csv`. This can be downloaded by running
+```
+chmod +x download_price_paid_and_postcodes.sh
+./download_price_paid_and_postcodes.sh
+```
+To fit the GP hyperparameters run:
 ```
 python fit_hexbin_gp_excursion_london_private.py \
   --ppd pp-2017.csv \

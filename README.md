@@ -1,10 +1,6 @@
 # Diﬀerential Privacy of Gaussian Process Posterior Sampling
 This repository is the official implementation of [Diﬀerential Privacy of Gaussian Process Posterior Sampling](https://arxiv.org/).
 
-Diﬀerential Privacy of Gaussian Process Posterior Sampling. Probing DP guarantees by MIA and privacy-utility tradeoff via excursion sets.
-
-This repository contains the main scripts used for the experiments in the paper. We are currently cleaning and documenting the remaining plotting and 2D-experiment scripts. They will be added in a subsequent update.
-
 ## Plotting approximate-DP Bounds
 
 To reproduce Figure 1 from the paper run:
